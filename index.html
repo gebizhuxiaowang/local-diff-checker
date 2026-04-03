@@ -418,6 +418,7 @@
             padding: 3px 8px;
             flex: 1;
             position: relative;
+            min-height: 26px;
         }
 
         .line-content[data-wrap="false"] {
@@ -503,33 +504,6 @@
             background-color: var(--bg-tertiary);
         }
 
-        /* 导出菜单 */
-        .export-menu {
-            display: none;
-            position: absolute;
-            background-color: var(--bg-primary);
-            border: 1px solid var(--border-color);
-            border-radius: 6px;
-            box-shadow: var(--shadow);
-            padding: 4px 0;
-            z-index: 100;
-            min-width: 160px;
-        }
-
-        .export-menu.show {
-            display: block;
-        }
-
-        .export-menu-item {
-            padding: 8px 12px;
-            cursor: pointer;
-            font-size: 14px;
-        }
-
-        .export-menu-item:hover {
-            background-color: var(--bg-secondary);
-        }
-
         /* 底部 */
         .footer {
             text-align: center;
@@ -559,23 +533,6 @@
         .toast.show {
             opacity: 1;
             transform: translateY(0);
-        }
-
-        /* 进度条 */
-        .progress-bar {
-            width: 100%;
-            height: 4px;
-            background-color: var(--bg-tertiary);
-            border-radius: 2px;
-            overflow: hidden;
-            margin: 8px 0;
-        }
-
-        .progress-fill {
-            height: 100%;
-            background-color: var(--accent-color);
-            width: 0%;
-            transition: width 0.2s;
         }
 
         /* 响应式 */
@@ -1224,34 +1181,20 @@
                 return;
             }
 
-            // 根据精度对比
             const accuracy = getAccuracy();
-            let diff;
-
-            switch (accuracy) {
-                case 'line':
-                    diff = Diff.diffLines(leftText, rightText);
-                    break;
-                case 'word':
-                    diff = Diff.diffWords(leftText, rightText);
-                    break;
-                case 'char':
-                    diff = Diff.diffChars(leftText, rightText);
-                    break;
-                default:
-                    diff = Diff.diffLines(leftText, rightText);
-            }
-
-            lastDiffResult = {type: 'text', diff};
             const viewMode = getViewMode();
 
+            // 按行分割后做对齐处理，保持行对齐，对内联差异做字符高亮
+            const leftLines = splitLines(leftText);
+            const rightLines = splitLines(rightText);
+
             if (viewMode === 'split') {
-                renderSplitView(diff, accuracy);
+                renderSplitViewAligned(leftLines, rightLines, accuracy, false);
             } else {
-                renderUnifiedView(diff, accuracy);
+                renderUnifiedViewAligned(leftLines, rightLines, accuracy, false);
             }
 
-            calculateTextStats(diff);
+            calculateAlignedStats(leftLines, rightLines);
             currentDiffIndex = currentDiffPositions.length > 0 ? 0 : -1;
             if (currentDiffPositions.length > 0) {
                 scrollToCurrentDiff();
@@ -1283,26 +1226,18 @@
                 const rightStr = JSON.stringify(rightObj, null, 2);
 
                 const accuracy = getAccuracy();
-                let diff;
-
-                if (accuracy === 'line') {
-                    diff = Diff.diffLines(leftStr, rightStr);
-                } else if (accuracy === 'word') {
-                    diff = Diff.diffWords(leftStr, rightStr);
-                } else {
-                    diff = Diff.diffChars(leftStr, rightStr);
-                }
-
-                lastDiffResult = {type: 'json', diff};
                 const viewMode = getViewMode();
 
+                const leftLines = splitLines(leftStr);
+                const rightLines = splitLines(rightStr);
+
                 if (viewMode === 'split') {
-                    renderSplitView(diff, accuracy, true);
+                    renderSplitViewAligned(leftLines, rightLines, accuracy, true);
                 } else {
-                    renderUnifiedView(diff, accuracy, true);
+                    renderUnifiedViewAligned(leftLines, rightLines, accuracy, true);
                 }
 
-                calculateTextStats(diff);
+                calculateAlignedStats(leftLines, rightLines);
                 currentDiffIndex = currentDiffPositions.length > 0 ? 0 : -1;
                 if (currentDiffPositions.length > 0) {
                     scrollToCurrentDiff();
@@ -1324,7 +1259,6 @@
         // JSON语法高亮
         function highlightJson(jsonStr) {
             try {
-                // 使用highlight.js进行JSON语法高亮
                 const result = hljs.highlight(jsonStr, {language: 'json'});
                 return result.value;
             } catch (e) {
@@ -1332,29 +1266,52 @@
             }
         }
 
-        // 带字符级高亮的内容处理
-        function processLineWithCharDiff(content, className, accuracy, isJson) {
-            // 如果不需要字符级高亮，直接返回语法高亮
-            if (accuracy === 'line' || (!className.includes('diff-delete') && !className.includes('diff-insert'))) {
-                if (isJson) {
-                    return highlightJson(content);
+        // 对单行做字符级差异高亮
+        function highlightLineDiff(leftLine, rightLine, accuracy, isJson) {
+            let diff;
+            if (accuracy === 'char') {
+                diff = Diff.diffChars(leftLine, rightLine);
+            } else if (accuracy === 'word') {
+                diff = Diff.diffWords(leftLine, rightLine);
+            } else {
+                diff = Diff.diffWords(leftLine, rightLine);
+            }
+
+            let leftHtml = '';
+            let rightHtml = '';
+
+            diff.forEach(part => {
+                const content = isJson ? part.value : escapeHtml(part.value);
+                if (part.added) {
+                    rightHtml += `<span class="char-insert">${content}</span>`;
+                } else if (part.removed) {
+                    leftHtml += `<span class="char-delete">${content}</span>`;
                 } else {
-                    return escapeHtml(content);
+                    leftHtml += content;
+                    rightHtml += content;
                 }
+            });
+
+            // 如果两边都没变，返回普通渲染
+            if (leftHtml === leftLine && rightHtml === rightLine) {
+                const processed = isJson ? highlightJson(leftLine) : escapeHtml(leftLine);
+                return {left: processed, right: processed, hasDiff: false};
             }
 
-            // 对于单词/字符精度对比，已经diff切分好了，直接使用diff的结构
-            // 当前diff库已经做了分割，我们只需要escape并添加高亮class
-            if (isJson) {
-                // JSON依然需要完整语法高亮
-                return highlightJson(content);
+            // 如果原线为空，说明是纯新增
+            if (!leftLine) {
+                return {left: '', right: rightHtml, hasDiff: true};
+            }
+            // 如果新线为空，说明是纯删除
+            if (!rightLine) {
+                return {left: leftHtml, right: '', hasDiff: true};
             }
 
-            return escapeHtml(content);
+            return {left: leftHtml, right: rightHtml, hasDiff: true};
         }
 
-        // 渲染拆分视图
-        function renderSplitView(diff, accuracy, isJson = false) {
+        // 渲染对齐的拆分视图（保持行号对齐，行内差异高亮）
+        function renderSplitViewAligned(leftLines, rightLines, accuracy, isJson) {
             currentDiffPositions = [];
             let leftHtml = '';
             let rightHtml = '';
@@ -1362,39 +1319,62 @@
             let rightLineNum = 1;
             let diffIndex = 0;
             const wordWrap = getWordWrap();
+            const folded = getFoldUnchanged();
 
-            diff.forEach(part => {
-                const lines = splitLines(part.value);
+            // 使用最长的行数循环，保持对齐
+            const maxLines = Math.max(leftLines.length, rightLines.length);
+            let unchangedCount = 0;
 
-                if (part.removed) {
-                    // 左侧显示删除
-                    lines.forEach(line => {
-                        leftHtml += renderDiffLine(line, 'diff-delete', leftLineNum++, diffIndex++, wordWrap, true, isJson, accuracy);
-                        currentDiffPositions.push({side: 'left', index: diffIndex - 1});
-                    });
-                } else if (part.added) {
-                    // 右侧显示新增
-                    lines.forEach(line => {
-                        rightHtml += renderDiffLine(line, 'diff-insert', rightLineNum++, diffIndex++, wordWrap, true, isJson, accuracy);
-                        currentDiffPositions.push({side: 'right', index: diffIndex - 1});
-                    });
+            for (let i = 0; i < maxLines; i++) {
+                const leftLine = i < leftLines.length ? leftLines[i] : '';
+                const rightLine = i < rightLines.length ? rightLines[i] : '';
+
+                // 如果两行都为空，跳过
+                if (!leftLine && !rightLine) {
+                    continue;
+                }
+
+                // 检查这一行是否相等
+                if (leftLine === rightLine) {
+                    // 无差异
+                    if (folded) {
+                        unchangedCount++;
+                        continue;
+                    }
+                    const processed = isJson ? highlightJson(leftLine) : escapeHtml(leftLine);
+                    leftHtml += renderAlignedLine(processed, 'diff-equal', leftLineNum++, -1, wordWrap, false);
+                    rightHtml += renderAlignedLine(processed, 'diff-equal', rightLineNum++, -1, wordWrap, false);
+                    unchangedCount++;
                 } else {
-                    // 两侧都显示相等
-                    const folded = getFoldUnchanged();
-                    if (lines.length > 3 && folded) {
-                        // 折叠多行相等内容
-                        leftHtml += renderExpandPlaceholder(lines.length, 'left');
-                        rightHtml += renderExpandPlaceholder(lines.length, 'right');
-                        leftLineNum += lines.length;
-                        rightLineNum += lines.length;
+                    // 有差异，输出折叠缓存
+                    if (unchangedCount > 3 && folded) {
+                        leftHtml += renderExpandPlaceholder(unchangedCount, 'left');
+                        rightHtml += renderExpandPlaceholder(unchangedCount, 'right');
+                        unchangedCount = 0;
+                    }
+
+                    // 行内差异高亮
+                    const highlighted = highlightLineDiff(leftLine, rightLine, accuracy, isJson);
+                    let leftClass = leftLine ? (highlighted.hasDiff ? 'diff-delete' : 'diff-equal') : 'diff-equal';
+                    let rightClass = rightLine ? (highlighted.hasDiff ? 'diff-insert' : 'diff-equal') : 'diff-equal';
+
+                    leftHtml += renderAlignedLine(highlighted.left, leftClass, leftLineNum++, diffIndex++, wordWrap, highlighted.hasDiff);
+                    rightHtml += renderAlignedLine(highlighted.right, rightClass, rightLineNum++, diffIndex++, wordWrap, highlighted.hasDiff);
+
+                    if (highlighted.hasDiff) {
+                        currentDiffPositions.push({side: 'left', index: diffIndex - 2});
+                        currentDiffPositions.push({side: 'right', index: diffIndex - 1});
                     } else {
-                        lines.forEach(line => {
-                            leftHtml += renderDiffLine(line, 'diff-equal', leftLineNum++, -1, wordWrap, false, isJson, accuracy);
-                            rightHtml += renderDiffLine(line, 'diff-equal', rightLineNum++, -1, wordWrap, false, isJson, accuracy);
-                        });
+                        unchangedCount++;
                     }
                 }
-            });
+            }
+
+            // 输出剩余的折叠
+            if (unchangedCount > 3 && folded) {
+                leftHtml += renderExpandPlaceholder(unchangedCount, 'left');
+                rightHtml += renderExpandPlaceholder(unchangedCount, 'right');
+            }
 
             resultContent.innerHTML = `
                 <div class="input-split" style="margin: 0;">
@@ -1425,81 +1405,63 @@
             bindCopyButtons();
         }
 
-        // 渲染单行（拆分视图）
-        function renderDiffLine(content, className, lineNumber, diffIndex, wordWrap, canCopy, isJson, accuracy) {
-            const processedContent = processLineWithCharDiff(content, className, accuracy, isJson);
-            const wrapAttr = `data-wrap="${wordWrap}"`;
-            const diffAttr = diffIndex >= 0 ? `data-diff-index="${diffIndex}"` : '';
-            const copyBtn = canCopy ? `<button class="copy-btn btn-sm" data-line-content="${escapeHtml(content).replace(/"/g, '&quot;')}">复制</button>` : '';
-
-            return `<div class="diff-line ${className}">
-                <div class="line-number">${lineNumber || ''}</div>
-                <div class="line-content" ${wrapAttr} ${diffAttr}>${copyBtn}${processedContent}</div>
-            </div>`;
-        }
-
-        // 渲染统一视图
-        function renderUnifiedView(diff, accuracy, isJson = false) {
+        // 渲染对齐的统一视图
+        function renderUnifiedViewAligned(leftLines, rightLines, accuracy, isJson) {
             currentDiffPositions = [];
             let html = '';
             let lineNum = 1;
             let diffIndex = 0;
             const wordWrap = getWordWrap();
-            const foldUnchanged = getFoldUnchanged();
-            let unchangedBuffer = [];
+            const folded = getFoldUnchanged();
+            let unchangedCount = 0;
 
-            diff.forEach(part => {
-                const lines = splitLines(part.value);
+            const maxLines = Math.max(leftLines.length, rightLines.length);
 
-                if (part.removed) {
-                    // 输出缓冲的相等内容
-                    if (unchangedBuffer.length > 0) {
-                        if (unchangedBuffer.length > 3 && foldUnchanged) {
-                            html += renderExpandPlaceholder(unchangedBuffer.length);
-                        } else {
-                            unchangedBuffer.forEach(line => {
-                                html += renderUnifiedLine(line, 'diff-equal', lineNum++, -1, wordWrap, isJson, accuracy);
-                            });
-                        }
+            for (let i = 0; i < maxLines; i++) {
+                const leftLine = i < leftLines.length ? leftLines[i] : '';
+                const rightLine = i < rightLines.length ? rightLines[i] : '';
 
-                        unchangedBuffer = [];
+                if (leftLine === rightLine) {
+                    if (folded) {
+                        unchangedCount++;
+                        continue;
+                    }
+                    const processed = isJson ? highlightJson(leftLine) : escapeHtml(leftLine);
+                    html += renderUnifiedAligned(processed, 'diff-equal', lineNum++, -1, wordWrap);
+                    unchangedCount++;
+                } else {
+                    if (unchangedCount > 3 && folded) {
+                        html += renderExpandPlaceholder(unchangedCount);
+                        unchangedCount = 0;
                     }
 
-                    lines.forEach(line => {
-                        html += renderUnifiedLine(line, 'diff-delete', lineNum++, diffIndex++, wordWrap, isJson, accuracy);
+                    if (leftLine && !rightLine) {
+                        // 纯删除
+                        const processed = isJson ? highlightJson(leftLine) : escapeHtml(leftLine);
+                        html += renderUnifiedAligned(processed, 'diff-delete', lineNum++, diffIndex++, wordWrap);
                         currentDiffPositions.push({side: 'unified', index: diffIndex - 1});
-                    });
-                } else if (part.added) {
-                    // 输出缓冲的相等内容
-                    if (unchangedBuffer.length > 0) {
-                        if (unchangedBuffer.length > 3 && foldUnchanged) {
-                            html += renderExpandPlaceholder(unchangedBuffer.length);
-                        } else {
-                            unchangedBuffer.forEach(line => {
-                                html += renderUnifiedLine(line, 'diff-equal', lineNum++, -1, wordWrap, isJson, accuracy);
-                            });
+                    } else if (!leftLine && rightLine) {
+                        // 纯新增
+                        const processed = isJson ? highlightJson(rightLine) : escapeHtml(rightLine);
+                        html += renderUnifiedAligned(processed, 'diff-insert', lineNum++, diffIndex++, wordWrap);
+                        currentDiffPositions.push({side: 'unified', index: diffIndex - 1});
+                    } else {
+                        // 同一行两边都有，做行内差异
+                        const highlighted = highlightLineDiff(leftLine, rightLine, accuracy, isJson);
+                        if (leftLine) {
+                            html += renderUnifiedAligned(highlighted.left, 'diff-delete', lineNum++, diffIndex++, wordWrap);
+                            currentDiffPositions.push({side: 'unified', index: diffIndex - 1});
                         }
-                        unchangedBuffer = [];
+                        if (rightLine) {
+                            html += renderUnifiedAligned(highlighted.right, 'diff-insert', lineNum++, diffIndex++, wordWrap);
+                            currentDiffPositions.push({side: 'unified', index: diffIndex - 1});
+                        }
                     }
-
-                    lines.forEach(line => {
-                        html += renderUnifiedLine(line, 'diff-insert', lineNum++, diffIndex++, wordWrap, isJson, accuracy);
-                        currentDiffPositions.push({side: 'unified', index: diffIndex - 1});
-                    });
-                } else {
-                    unchangedBuffer.push(...lines);
                 }
-            });
+            }
 
-            // 输出剩余相等内容
-            if (unchangedBuffer.length > 0) {
-                if (unchangedBuffer.length > 3 && foldUnchanged) {
-                    html += renderExpandPlaceholder(unchangedBuffer.length);
-                } else {
-                    unchangedBuffer.forEach(line => {
-                        html += renderUnifiedLine(line, 'diff-equal', lineNum++, -1, wordWrap, isJson, accuracy);
-                    });
-                }
+            if (unchangedCount > 3 && folded) {
+                html += renderExpandPlaceholder(unchangedCount);
             }
 
             resultContent.innerHTML = html;
@@ -1520,22 +1482,59 @@
             bindCopyButtons();
         }
 
-        // 渲染单行（统一视图）
-        function renderUnifiedLine(content, className, lineNumber, diffIndex, wordWrap, isJson, accuracy) {
-            const processedContent = processLineWithCharDiff(content, className, accuracy, isJson);
+        // 渲染单行（拆分对齐视图）
+        function renderAligned(content, className, lineNumber, diffIndex, wordWrap, canCopy) {
+            const wrapAttr = `data-wrap="${wordWrap}"`;
+            const diffAttr = diffIndex >= 0 ? `data-diff-index="${diffIndex}"` : '';
+            const copyBtn = canCopy ? `<button class="copy-btn btn-sm" data-line-content="${escapeHtml(content).replace(/"/g, '&quot;')}">复制</button>` : '';
+
+            return `<div class="diff-line ${className}">
+                <div class="line-number">${lineNumber || ''}</div>
+                <div class="line-content" ${wrapAttr} ${diffAttr}>${copyBtn}${content}</div>
+            </div>`;
+        }
+
+        // 渲染单行（统一对齐视图）
+        function renderUnifiedAligned(content, className, lineNumber, diffIndex, wordWrap) {
             const wrapAttr = `data-wrap="${wordWrap}"`;
             const diffAttr = diffIndex >= 0 ? `data-diff-index="${diffIndex}"` : '';
             const copyBtn = `<button class="copy-btn btn-sm" data-line-content="${escapeHtml(content).replace(/"/g, '&quot;')}">复制</button>`;
 
             return `<div class="diff-line ${className}" ${diffAttr}>
                 <div class="line-number">${lineNumber || ''}</div>
-                <div class="line-content" ${wrapAttr}>${copyBtn}${processedContent}</div>
+                <div class="line-content" ${wrapAttr}>${copyBtn}${content}</div>
             </div>`;
         }
 
         // 渲染展开占位符
         function renderExpandPlaceholder(count, side = null) {
             return `<div class="expand-placeholder">⌄ 展开 ${count} 行未更改内容 ⌄</div>`;
+        }
+
+        // 计算对齐后的统计
+        function calculateAlignedStats(leftLines, rightLines) {
+            let insert = 0;
+            let del = 0;
+            const total = Math.max(leftLines.length, rightLines.length);
+            let unchanged = 0;
+
+            for (let i = 0; i < Math.max(leftLines.length, rightLines.length); i++) {
+                const left = i < leftLines.length ? leftLines[i] : '';
+                const right = i < rightLines.length ? rightLines[i] : '';
+                if (left === right) {
+                    unchanged++;
+                } else {
+                    if (left && !right) del++;
+                    else if (right && !left) insert++;
+                    else {
+                        del++;
+                        insert++;
+                    }
+                }
+            }
+
+            const modify = Math.abs(insert - del);
+            updateStats(insert, del, modify, total, unchanged);
         }
 
         // 分割行
@@ -1559,7 +1558,9 @@
         function bindCopyButtons() {
             document.querySelectorAll('.copy-btn').forEach(btn => {
                 btn.addEventListener('click', async (e) => {
-                    const content = e.target.dataset.lineContent;
+                    let content = e.target.dataset.lineContent;
+                    // 去除高亮标签，提取纯文本
+                    content = content.replace(/<[^>]+>/g, '');
                     try {
                         await navigator.clipboard.writeText(content);
                         showToast('已复制行内容');
@@ -1572,24 +1573,6 @@
         }
 
         // 统计
-        function calculateTextStats(diff) {
-            let insert = 0;
-            let del = 0;
-            let total = 0;
-            let unchanged = 0;
-
-            diff.forEach(part => {
-                const lineCount = splitLines(part.value).length;
-                total += lineCount;
-                if (part.added) insert += lineCount;
-                else if (part.removed) del += lineCount;
-                else unchanged += lineCount;
-            });
-
-            const modify = Math.abs(insert - del);
-            updateStats(insert, del, modify, total, unchanged);
-        }
-
         function updateStats(insert, del, modify, total, unchanged) {
             statInsert.textContent = insert;
             statDelete.textContent = del;
@@ -1711,7 +1694,10 @@
             const diffLines = resultContent.querySelectorAll('.diff-line');
             diffLines.forEach(el => {
                 const content = el.querySelector('.line-content');
-                if (content) lines.push(content.textContent.trim());
+                if (content) {
+                    let text = content.textContent.trim();
+                    if (text) lines.push(text);
+                }
             });
             return lines.join('\n');
         }
