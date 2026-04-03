@@ -1,0 +1,1256 @@
+<!DOCTYPE html>
+<html lang="zh-CN">
+<head>
+    <meta charset="UTF-8">
+    <meta name="viewport" content="width=device-width, initial-scale=1.0">
+    <title>本地文件差异对比工具 - Local Diff Checker</title>
+    <style>
+        * {
+            margin: 0;
+            padding: 0;
+            box-sizing: border-box;
+        }
+
+        :root {
+            --bg-primary: #ffffff;
+            --bg-secondary: #f5f5f5;
+            --bg-tertiary: #e8e8e8;
+            --text-primary: #333333;
+            --text-secondary: #666666;
+            --border-color: #dddddd;
+            --accent-color: #2196f3;
+            --accent-hover: #1976d2;
+            --insert-bg: #e6ffed;
+            --insert-border: #2da44e;
+            --delete-bg: #ffeef0;
+            --delete-border: #cf222e;
+            --modify-bg: #fff8c5;
+            --modify-border: #e3c000;
+            --shadow: 0 2px 8px rgba(0,0,0,0.1);
+        }
+
+        [data-theme="dark"] {
+            --bg-primary: #1e1e1e;
+            --bg-secondary: #2d2d2d;
+            --bg-tertiary: #404040;
+            --text-primary: #d4d4d4;
+            --text-secondary: #a0a0a0;
+            --border-color: #505050;
+            --accent-color: #3b82f6;
+            --accent-hover: #2563eb;
+            --insert-bg: #134e2b;
+            --insert-border: #2da44e;
+            --delete-bg: #46131b;
+            --delete-border: #cf222e;
+            --modify-bg: #453916;
+            --modify-border: #e3c000;
+            --shadow: 0 2px 8px rgba(0,0,0,0.3);
+        }
+
+        body {
+            font-family: -apple-system, BlinkMacSystemFont, "Segoe UI", Roboto, "Helvetica Neue", Arial, sans-serif;
+            background-color: var(--bg-secondary);
+            color: var(--text-primary);
+            line-height: 1.5;
+            min-height: 100vh;
+        }
+
+        /* 顶部导航栏 */
+        .header {
+            background-color: var(--bg-primary);
+            border-bottom: 1px solid var(--border-color);
+            padding: 12px 20px;
+            display: flex;
+            align-items: center;
+            justify-content: space-between;
+            box-shadow: var(--shadow);
+        }
+
+        .header-left {
+            display: flex;
+            align-items: center;
+            gap: 20px;
+        }
+
+        .logo {
+            font-size: 20px;
+            font-weight: bold;
+            color: var(--accent-color);
+        }
+
+        .format-tabs {
+            display: flex;
+            gap: 4px;
+        }
+
+        .format-tab {
+            padding: 6px 16px;
+            border: 1px solid transparent;
+            background: transparent;
+            color: var(--text-secondary);
+            cursor: pointer;
+            border-radius: 6px;
+            font-size: 14px;
+            transition: all 0.2s;
+        }
+
+        .format-tab:hover {
+            background-color: var(--bg-secondary);
+            color: var(--text-primary);
+        }
+
+        .format-tab.active {
+            background-color: var(--accent-color);
+            color: white;
+            border-color: var(--accent-color);
+        }
+
+        .header-right {
+            display: flex;
+            gap: 8px;
+            align-items: center;
+        }
+
+        .btn {
+            padding: 6px 12px;
+            border: 1px solid var(--border-color);
+            background-color: var(--bg-primary);
+            color: var(--text-primary);
+            cursor: pointer;
+            border-radius: 4px;
+            font-size: 14px;
+            transition: all 0.2s;
+        }
+
+        .btn:hover {
+            background-color: var(--bg-secondary);
+        }
+
+        .btn-primary {
+            background-color: var(--accent-color);
+            border-color: var(--accent-color);
+            color: white;
+        }
+
+        .btn-primary:hover {
+            background-color: var(--accent-hover);
+            border-color: var(--accent-hover);
+        }
+
+        .btn-danger {
+            color: #cf222e;
+            border-color: #cf222e;
+        }
+
+        .btn-danger:hover {
+            background-color: #ffeef0;
+        }
+
+        /* 主容器 */
+        .container {
+            max-width: 1400px;
+            margin: 20px auto;
+            padding: 0 20px;
+        }
+
+        /* 对比区域 */
+        .diff-container {
+            display: grid;
+            grid-template-columns: 1fr 1fr;
+            gap: 16px;
+            margin-bottom: 16px;
+        }
+
+        .panel {
+            background-color: var(--bg-primary);
+            border: 1px solid var(--border-color);
+            border-radius: 8px;
+            overflow: hidden;
+            box-shadow: var(--shadow);
+        }
+
+        .panel-header {
+            padding: 12px 16px;
+            background-color: var(--bg-secondary);
+            border-bottom: 1px solid var(--border-color);
+            display: flex;
+            align-items: center;
+            justify-content: space-between;
+        }
+
+        .panel-title {
+            font-weight: 600;
+            font-size: 15px;
+        }
+
+        .file-info {
+            font-size: 12px;
+            color: var(--text-secondary);
+        }
+
+        .upload-btn {
+            display: inline-block;
+            padding: 4px 10px;
+            background-color: var(--accent-color);
+            color: white;
+            border-radius: 4px;
+            cursor: pointer;
+            font-size: 13px;
+        }
+
+        .upload-btn input[type="file"] {
+            display: none;
+        }
+
+        .panel-content {
+            position: relative;
+        }
+
+        .editor {
+            width: 100%;
+            min-height: 400px;
+            max-height: 600px;
+            padding: 12px 16px;
+            border: none;
+            outline: none;
+            resize: vertical;
+            background-color: var(--bg-primary);
+            color: var(--text-primary);
+            font-family: "Consolas", "Monaco", "Courier New", monospace;
+            font-size: 14px;
+            line-height: 1.6;
+            white-space: pre;
+            overflow: auto;
+        }
+
+        .empty-placeholder {
+            padding: 60px 20px;
+            text-align: center;
+            color: var(--text-secondary);
+        }
+
+        .empty-placeholder-icon {
+            font-size: 48px;
+            margin-bottom: 12px;
+            opacity: 0.3;
+        }
+
+        /* Excel工作表选择 */
+        .sheet-selector {
+            padding: 8px 16px;
+            background-color: var(--bg-secondary);
+            border-bottom: 1px solid var(--border-color);
+        }
+
+        .sheet-selector label {
+            font-size: 13px;
+            margin-right: 8px;
+        }
+
+        .sheet-selector select {
+            padding: 4px 8px;
+            border: 1px solid var(--border-color);
+            border-radius: 4px;
+            background-color: var(--bg-primary);
+            color: var(--text-primary);
+        }
+
+        /* 工具栏 */
+        .toolbar {
+            background-color: var(--bg-primary);
+            border: 1px solid var(--border-color);
+            border-radius: 8px;
+            padding: 12px 16px;
+            margin-bottom: 16px;
+            display: flex;
+            align-items: center;
+            justify-content: space-between;
+            flex-wrap: wrap;
+            gap: 12px;
+            box-shadow: var(--shadow);
+        }
+
+        .toolbar-left {
+            display: flex;
+            gap: 8px;
+            flex-wrap: wrap;
+        }
+
+        .toolbar-right {
+            display: flex;
+            gap: 8px;
+            align-items: center;
+        }
+
+        .diff-stats {
+            display: flex;
+            gap: 16px;
+            font-size: 14px;
+        }
+
+        .stat-item {
+            display: flex;
+            align-items: center;
+            gap: 4px;
+        }
+
+        .stat-insert {
+            color: var(--insert-border);
+        }
+
+        .stat-delete {
+            color: var(--delete-border);
+        }
+
+        .stat-modify {
+            color: var(--modify-border);
+        }
+
+        /* 结果区域 */
+        .result-container {
+            background-color: var(--bg-primary);
+            border: 1px solid var(--border-color);
+            border-radius: 8px;
+            overflow: hidden;
+            box-shadow: var(--shadow);
+        }
+
+        .result-header {
+            padding: 12px 16px;
+            background-color: var(--bg-secondary);
+            border-bottom: 1px solid var(--border-color);
+            font-weight: 600;
+        }
+
+        .result-content {
+            padding: 16px;
+            overflow-x: auto;
+        }
+
+        /* 差异展示样式 */
+        .diff-line {
+            display: flex;
+            font-family: "Consolas", "Monaco", "Courier New", monospace;
+            font-size: 14px;
+            line-height: 1.6;
+        }
+
+        .line-number {
+            width: 50px;
+            text-align: right;
+            padding: 2px 8px;
+            color: var(--text-secondary);
+            background-color: var(--bg-secondary);
+            user-select: none;
+            border-right: 1px solid var(--border-color);
+            flex-shrink: 0;
+        }
+
+        .line-content {
+            padding: 2px 8px;
+            white-space: pre;
+            word-break: break-all;
+            flex: 1;
+        }
+
+        .diff-insert {
+            background-color: var(--insert-bg);
+            border-left: 3px solid var(--insert-border);
+        }
+
+        .diff-delete {
+            background-color: var(--delete-bg);
+            border-left: 3px solid var(--delete-border);
+            text-decoration: line-through;
+        }
+
+        .diff-equal {
+            background-color: transparent;
+        }
+
+        .diff-modify {
+            background-color: var(--modify-bg);
+            border-left: 3px solid var(--modify-border);
+        }
+
+        .char-insert {
+            background-color: rgba(45, 164, 78, 0.3);
+        }
+
+        .char-delete {
+            background-color: rgba(207, 34, 46, 0.3);
+            text-decoration: line-through;
+        }
+
+        /* JSON对比样式 */
+        .json-node {
+            margin-left: 20px;
+        }
+
+        .json-key {
+            color: #003399;
+            font-weight: bold;
+        }
+
+        .json-string {
+            color: #008000;
+        }
+
+        .json-number {
+            color: #0000ff;
+        }
+
+        .json-boolean {
+            color: #0000ff;
+        }
+
+        .json-null {
+            color: #808080;
+        }
+
+        .json-insert {
+            background-color: var(--insert-bg);
+        }
+
+        .json-delete {
+            background-color: var(--delete-bg);
+        }
+
+        .json-modify {
+            background-color: var(--modify-bg);
+        }
+
+        /* 折叠展开 */
+        .json-toggle {
+            cursor: pointer;
+            user-select: none;
+            display: inline-block;
+            width: 16px;
+            text-align: center;
+        }
+
+        .json-collapsed .json-node {
+            display: none;
+        }
+
+        /* 底部说明 */
+        .footer {
+            max-width: 1400px;
+            margin: 20px auto;
+            padding: 16px 20px;
+            text-align: center;
+            color: var(--text-secondary);
+            font-size: 13px;
+        }
+
+        /* 响应式 */
+        @media (max-width: 900px) {
+            .diff-container {
+                grid-template-columns: 1fr;
+            }
+        }
+
+        /* 选项设置 */
+        .options-group {
+            display: flex;
+            gap: 12px;
+            align-items: center;
+            flex-wrap: wrap;
+        }
+
+        .option-item {
+            display: flex;
+            align-items: center;
+            gap: 4px;
+            font-size: 13px;
+            cursor: pointer;
+        }
+
+        /* 弹窗提示 */
+        .toast {
+            position: fixed;
+            top: 20px;
+            right: 20px;
+            padding: 12px 20px;
+            background-color: var(--bg-primary);
+            border: 1px solid var(--border-color);
+            border-radius: 6px;
+            box-shadow: var(--shadow);
+            opacity: 0;
+            transform: translateY(-10px);
+            transition: all 0.3s;
+            z-index: 1000;
+        }
+
+        .toast.show {
+            opacity: 1;
+            transform: translateY(0);
+        }
+    </style>
+</head>
+<body>
+    <div class="header">
+        <div class="header-left">
+            <div class="logo">Local Diff Checker</div>
+            <div class="format-tabs">
+                <button class="format-tab active" data-format="text">文本</button>
+                <button class="format-tab" data-format="json">JSON</button>
+                <button class="format-tab" data-format="excel">Excel</button>
+                <button class="format-tab" data-format="word">Word</button>
+                <button class="format-tab" data-format="pdf">PDF</button>
+            </div>
+        </div>
+        <div class="header-right">
+            <button class="btn" id="themeToggle">🌓 主题</button>
+        </div>
+    </div>
+
+    <div class="container">
+        <!-- 对比输入区域 -->
+        <div class="diff-container">
+            <!-- 左侧：原始内容 -->
+            <div class="panel">
+                <div class="panel-header">
+                    <div>
+                        <div class="panel-title">原始内容 (左侧)</div>
+                        <div class="file-info" id="leftFileInfo">请输入或上传文件</div>
+                    </div>
+                    <label class="upload-btn">
+                        📁 上传文件
+                        <input type="file" id="leftFileInput">
+                    </label>
+                </div>
+                <div id="leftSheetSelector" class="sheet-selector" style="display: none;">
+                    <label>工作表:</label>
+                    <select id="leftSheet"></select>
+                </div>
+                <div class="panel-content">
+                    <textarea class="editor" id="leftEditor" placeholder="在此输入原始内容..."></textarea>
+                </div>
+            </div>
+
+            <!-- 右侧：修改后内容 -->
+            <div class="panel">
+                <div class="panel-header">
+                    <div>
+                        <div class="panel-title">修改内容 (右侧)</div>
+                        <div class="file-info" id="rightFileInfo">请输入或上传文件</div>
+                    </div>
+                    <label class="upload-btn">
+                        📁 上传文件
+                        <input type="file" id="rightFileInput">
+                    </label>
+                </div>
+                <div id="rightSheetSelector" class="sheet-selector" style="display: none;">
+                    <label>工作表:</label>
+                    <select id="rightSheet"></select>
+                </div>
+                <div class="panel-content">
+                    <textarea class="editor" id="rightEditor" placeholder="在此输入修改后的内容..."></textarea>
+                </div>
+            </div>
+        </div>
+
+        <!-- 工具栏 -->
+        <div class="toolbar">
+            <div class="toolbar-left">
+                <button class="btn btn-primary" id="compareBtn">🔍 开始对比</button>
+                <button class="btn" id="swapBtn">🔄 交换两侧</button>
+                <button class="btn btn-danger" id="clearBtn">🗑️ 清空内容</button>
+                <div class="options-group" id="textOptions" style="display: none;">
+                    <label class="option-item">
+                        <input type="checkbox" id="ignoreCase"> 忽略大小写
+                    </label>
+                    <label class="option-item">
+                        <input type="checkbox" id="ignoreWhitespace"> 忽略空格
+                    </label>
+                    <label class="option-item">
+                        <input type="checkbox" id="ignoreEmptyLines"> 忽略空行
+                    </label>
+                </div>
+            </div>
+            <div class="toolbar-right">
+                <div class="diff-stats" id="diffStats">
+                    <div class="stat-item stat-insert">新增: <span id="statInsert">0</span></div>
+                    <div class="stat-item stat-delete">删除: <span id="statDelete">0</span></div>
+                    <div class="stat-item stat-modify">修改: <span id="statModify">0</span></div>
+                </div>
+                <div style="width: 1px; height: 24px; background-color: var(--border-color);"></div>
+                <button class="btn" id="prevDiffBtn">⬆️ 上一处</button>
+                <button class="btn" id="nextDiffBtn">⬇️ 下一处</button>
+                <div style="width: 1px; height: 24px; background-color: var(--border-color);"></div>
+                <button class="btn" id="copyResultBtn">📋 复制结果</button>
+                <button class="btn" id="exportBtn">📥 导出报告</button>
+            </div>
+        </div>
+
+        <!-- 对比结果区域 -->
+        <div class="result-container">
+            <div class="result-header">对比结果</div>
+            <div class="result-content" id="resultContent">
+                <div style="text-align: center; color: var(--text-secondary); padding: 40px;">
+                    点击上方「开始对比」按钮查看差异对比结果
+                </div>
+            </div>
+        </div>
+    </div>
+
+    <div class="footer">
+        🦞 本地差异对比工具 | 所有计算在浏览器本地完成，不上传任何数据到服务器 | 支持文本/JSON/Excel/Word/PDF 格式对比
+    </div>
+
+    <div class="toast" id="toast"></div>
+
+    <!-- 第三方库 CDN -->
+    <script src="https://cdn.jsdelivr.net/npm/diff@5.1.0/dist/diff.min.js"></script>
+    <script src="https://cdn.jsdelivr.net/npm/xlsx@0.18.5/dist/xlsx.full.min.js"></script>
+    <script src="https://cdn.jsdelivr.net/npm/mammoth@1.6.0/mammoth.browser.min.js"></script>
+    <script src="https://cdn.jsdelivr.net/npm/pdfjs-dist@3.11.174/build/pdf.min.js"></script>
+
+    <script>
+        // 基础配置
+        pdfjsLib.GlobalWorkerOptions.workerSrc = 'https://cdn.jsdelivr.net/npm/pdfjs-dist@3.11.174/build/pdf.worker.min.js';
+
+        // 全局状态
+        let currentFormat = 'text';
+        let leftSheets = [];
+        let rightSheets = [];
+        let currentDiffPositions = [];
+        let currentDiffIndex = -1;
+
+        // DOM 元素
+        const formatTabs = document.querySelectorAll('.format-tab');
+        const leftFileInput = document.getElementById('leftFileInput');
+        const rightFileInput = document.getElementById('rightFileInput');
+        const leftFileInfo = document.getElementById('leftFileInfo');
+        const rightFileInfo = document.getElementById('rightFileInfo');
+        const leftEditor = document.getElementById('leftEditor');
+        const rightEditor = document.getElementById('rightEditor');
+        const leftSheetSelector = document.getElementById('leftSheetSelector');
+        const rightSheetSelector = document.getElementById('rightSheetSelector');
+        const leftSheetSelect = document.getElementById('leftSheet');
+        const rightSheetSelect = document.getElementById('rightSheet');
+        const compareBtn = document.getElementById('compareBtn');
+        const swapBtn = document.getElementById('swapBtn');
+        const clearBtn = document.getElementById('clearBtn');
+        const resultContent = document.getElementById('resultContent');
+        const statInsert = document.getElementById('statInsert');
+        const statDelete = document.getElementById('statDelete');
+        const statModify = document.getElementById('statModify');
+        const prevDiffBtn = document.getElementById('prevDiffBtn');
+        const nextDiffBtn = document.getElementById('nextDiffBtn');
+        const copyResultBtn = document.getElementById('copyResultBtn');
+        const exportBtn = document.getElementById('exportBtn');
+        const themeToggle = document.getElementById('themeToggle');
+        const textOptions = document.getElementById('textOptions');
+        const toast = document.getElementById('toast');
+
+        // 主题切换
+        function initTheme() {
+            const savedTheme = localStorage.getItem('theme') || 'light';
+            document.documentElement.setAttribute('data-theme', savedTheme);
+        }
+
+        themeToggle.addEventListener('click', () => {
+            const currentTheme = document.documentElement.getAttribute('data-theme');
+            const newTheme = currentTheme === 'light' ? 'dark' : 'light';
+            document.documentElement.setAttribute('data-theme', newTheme);
+            localStorage.setItem('theme', newTheme);
+        });
+
+        // 格式切换
+        formatTabs.forEach(tab => {
+            tab.addEventListener('click', () => {
+                formatTabs.forEach(t => t.classList.remove('active'));
+                tab.classList.add('active');
+                currentFormat = tab.dataset.format;
+                updateUIVisibility();
+            });
+        });
+
+        function updateUIVisibility() {
+            if (currentFormat === 'text') {
+                textOptions.style.display = 'flex';
+                leftSheetSelector.style.display = 'none';
+                rightSheetSelector.style.display = 'none';
+            } else if (currentFormat === 'json') {
+                textOptions.style.display = 'none';
+                leftSheetSelector.style.display = 'none';
+                rightSheetSelector.style.display = 'none';
+            } else if (currentFormat === 'excel') {
+                textOptions.style.display = 'none';
+                // 只在有工作表时显示
+                if (leftSheets.length === 0) leftSheetSelector.style.display = 'none';
+                if (rightSheets.length === 0) rightSheetSelector.style.display = 'none';
+            } else {
+                textOptions.style.display = 'none';
+                leftSheetSelector.style.display = 'none';
+                rightSheetSelector.style.display = 'none';
+            }
+        }
+
+        // 显示提示消息
+        function showToast(message) {
+            toast.textContent = message;
+            toast.classList.add('show');
+            setTimeout(() => {
+                toast.classList.remove('show');
+            }, 2500);
+        }
+
+        // 文件上传处理
+        async function handleFileUpload(file, side) {
+            const maxSize = 10 * 1024 * 1024; // 10MB
+            if (file.size > maxSize) {
+                showToast('文件太大，请选择小于 10MB 的文件');
+                return;
+            }
+
+            try {
+                let text = '';
+                switch (currentFormat) {
+                    case 'text':
+                        text = await readTextFile(file);
+                        break;
+                    case 'json':
+                        text = await readTextFile(file);
+                        try {
+                            const json = JSON.parse(text);
+                            text = JSON.stringify(json, null, 2);
+                        } catch (e) {
+                            showToast('JSON 格式错误，请检查文件');
+                        }
+                        break;
+                    case 'excel':
+                        text = await readExcelFile(file, side);
+                        break;
+                    case 'word':
+                        text = await readWordFile(file);
+                        break;
+                    case 'pdf':
+                        text = await readPdfFile(file);
+                        break;
+                }
+
+                if (side === 'left') {
+                    leftEditor.value = text;
+                    leftFileInfo.textContent = `${file.name} (${formatFileSize(file.size)})`;
+                } else {
+                    rightEditor.value = text;
+                    rightFileInfo.textContent = `${file.name} (${formatFileSize(file.size)})`;
+                }
+
+                showToast('文件解析成功');
+            } catch (error) {
+                console.error('File parse error:', error);
+                showToast('文件解析失败: ' + error.message);
+            }
+        }
+
+        function readTextFile(file) {
+            return new Promise((resolve, reject) => {
+                const reader = new FileReader();
+                reader.onload = (e) => resolve(e.target.result);
+                reader.onerror = reject;
+                reader.readAsText(file);
+            });
+        }
+
+        function formatFileSize(bytes) {
+            if (bytes < 1024) return bytes + ' B';
+            if (bytes < 1024 * 1024) return (bytes / 1024).toFixed(1) + ' KB';
+            return (bytes / (1024 * 1024)).toFixed(1) + ' MB';
+        }
+
+        async function readExcelFile(file, side) {
+            return new Promise((resolve, reject) => {
+                const reader = new FileReader();
+                reader.onload = async (e) => {
+                    try {
+                        const data = new Uint8Array(e.target.result);
+                        const workbook = XLSX.read(data, {type: 'array'});
+                        
+                        if (side === 'left') {
+                            leftSheets = workbook.SheetNames;
+                            updateSheetSelector(leftSheets, leftSheetSelect, leftSheetSelector);
+                        } else {
+                            rightSheets = workbook.SheetNames;
+                            updateSheetSelector(rightSheets, rightSheetSelect, rightSheetSelector);
+                        }
+
+                        // 默认读取第一个工作表
+                        const firstSheet = workbook.SheetNames[0];
+                        const worksheet = workbook.Sheets[firstSheet];
+                        const json = XLSX.utils.sheet_to_json(worksheet, {header: 1});
+                        const text = convertExcelToText(json);
+                        resolve(text);
+                    } catch (error) {
+                        reject(error);
+                    }
+                };
+                reader.onerror = reject;
+                reader.readAsArrayBuffer(file);
+            });
+        }
+
+        function updateSheetSelector(sheets, selectElement, container) {
+            selectElement.innerHTML = '';
+            sheets.forEach(sheet => {
+                const option = document.createElement('option');
+                option.value = sheet;
+                option.textContent = sheet;
+                selectElement.appendChild(option);
+            });
+            container.style.display = 'block';
+            updateUIVisibility();
+        }
+
+        function convertExcelToText(data) {
+            let text = '';
+            data.forEach(row => {
+                text += row.join('\t') + '\n';
+            });
+            return text;
+        }
+
+        async function readWordFile(file) {
+            return new Promise((resolve, reject) => {
+                const reader = new FileReader();
+                reader.onload = async (e) => {
+                    try {
+                        const arrayBuffer = e.target.result;
+                        const result = await mammoth.extractRawText({arrayBuffer: arrayBuffer});
+                        resolve(result.value);
+                    } catch (error) {
+                        reject(error);
+                    }
+                };
+                reader.onerror = reject;
+                reader.readAsArrayBuffer(file);
+            });
+        }
+
+        async function readPdfFile(file) {
+            return new Promise((resolve, reject) => {
+                const reader = new FileReader();
+                reader.onload = async (e) => {
+                    try {
+                        const typedArray = new Uint8Array(e.target.result);
+                        const pdf = await pdfjsLib.getDocument(typedArray).promise;
+                        let text = '';
+                        for (let i = 1; i <= pdf.numPages; i++) {
+                            const page = await pdf.getPage(i);
+                            const content = await page.getTextContent();
+                            const pageText = content.items.map(item => item.str).join(' ');
+                            text += pageText + '\n\n';
+                        }
+                        resolve(text);
+                    } catch (error) {
+                        reject(error);
+                    }
+                };
+                reader.onerror = reject;
+                reader.readAsArrayBuffer(file);
+            });
+        }
+
+        // 工作表切换
+        leftSheetSelect.addEventListener('change', async () => {
+            const file = leftFileInput.files[0];
+            if (!file) return;
+            const text = await readExcelSheet(file, leftSheetSelect.value);
+            leftEditor.value = text;
+        });
+
+        rightSheetSelect.addEventListener('change', async () => {
+            const file = rightFileInput.files[0];
+            if (!file) return;
+            const text = await readExcelSheet(file, rightSheetSelect.value);
+            rightEditor.value = text;
+        });
+
+        async function readExcelSheet(file, sheetName) {
+            return new Promise((resolve, reject) => {
+                const reader = new FileReader();
+                reader.onload = (e) => {
+                    const data = new Uint8Array(e.target.result);
+                    const workbook = XLSX.read(data, {type: 'array'});
+                    const worksheet = workbook.Sheets[sheetName];
+                    const json = XLSX.utils.sheet_to_json(worksheet, {header: 1});
+                    const text = convertExcelToText(json);
+                    resolve(text);
+                };
+                reader.onerror = reject;
+                reader.readAsArrayBuffer(file);
+            });
+        }
+
+        // 绑定文件上传事件
+        leftFileInput.addEventListener('change', (e) => {
+            const file = e.target.files[0];
+            if (file) handleFileUpload(file, 'left');
+        });
+
+        rightFileInput.addEventListener('change', (e) => {
+            const file = e.target.files[0];
+            if (file) handleFileUpload(file, 'right');
+        });
+
+        // 交换两侧内容
+        swapBtn.addEventListener('click', () => {
+            const temp = leftEditor.value;
+            leftEditor.value = rightEditor.value;
+            rightEditor.value = temp;
+
+            // 交换文件信息
+            const tempInfo = leftFileInfo.textContent;
+            leftFileInfo.textContent = rightFileInfo.textContent;
+            rightFileInfo.textContent = tempInfo;
+
+            // 交换工作表
+            if (currentFormat === 'excel') {
+                const tempSheets = leftSheets;
+                leftSheets = rightSheets;
+                rightSheets = tempSheets;
+                // 更新选择器
+                updateSheetSelector(leftSheets, leftSheetSelect, leftSheetSelector);
+                updateSheetSelector(rightSheets, rightSheetSelect, rightSheetSelector);
+            }
+
+            showToast('已交换两侧内容');
+        });
+
+        // 清空内容
+        clearBtn.addEventListener('click', () => {
+            leftEditor.value = '';
+            rightEditor.value = '';
+            leftFileInfo.textContent = '请输入或上传文件';
+            rightFileInfo.textContent = '请输入或上传文件';
+            leftFileInput.value = '';
+            rightFileInput.value = '';
+            leftSheets = [];
+            rightSheets = [];
+            leftSheetSelector.style.display = 'none';
+            rightSheetSelector.style.display = 'none';
+            resultContent.innerHTML = '<div style="text-align: center; color: var(--text-secondary); padding: 40px;">点击上方「开始对比」按钮查看差异对比结果</div>';
+            updateStats(0, 0, 0);
+            currentDiffPositions = [];
+            currentDiffIndex = -1;
+            showToast('已清空所有内容');
+        });
+
+        // 核心对比逻辑
+        compareBtn.addEventListener('click', () => {
+            let leftText = leftEditor.value;
+            let rightText = rightEditor.value;
+
+            if (!leftText && !rightText) {
+                showToast('两侧都没有内容，请输入或上传文件');
+                return;
+            }
+
+            // 应用选项（仅文本对比）
+            if (currentFormat === 'text') {
+                leftText = applyTextOptions(leftText);
+                rightText = applyTextOptions(rightText);
+            }
+
+            // JSON 对比特殊处理
+            if (currentFormat === 'json') {
+                compareJson(leftText, rightText);
+                return;
+            }
+
+            // 按行对比文本
+            const leftLines = splitLines(leftText);
+            const rightLines = splitLines(rightText);
+            const diff = Diff.diffLines(leftLines.join('\n'), rightLines.join('\n'));
+            renderTextDiff(diff);
+            calculateStats(diff);
+        });
+
+        function applyTextOptions(text) {
+            if (document.getElementById('ignoreCase').checked) {
+                text = text.toLowerCase();
+            }
+            if (document.getElementById('ignoreWhitespace').checked) {
+                text = text.replace(/\s+/g, ' ').trim();
+            }
+            if (document.getElementById('ignoreEmptyLines').checked) {
+                text = text.split('\n').filter(line => line.trim() !== '').join('\n');
+            }
+            return text;
+        }
+
+        function splitLines(text) {
+            return text.split(/\r?\n/);
+        }
+
+        function renderTextDiff(diff) {
+            let html = '';
+            let lineNumber = 1;
+            currentDiffPositions = [];
+            let positionIndex = 0;
+
+            diff.forEach(part => {
+                const lines = splitLines(part.value);
+                const className = part.added ? 'diff-insert' :
+                               part.removed ? 'diff-delete' : 'diff-equal';
+
+                lines.forEach(line => {
+                    // 如果是空行，保留换行但不显示多余内容
+                    if (line === '') {
+                        html += `<div class="diff-line ${className}">
+                            <div class="line-number">${part.added || part.removed ? '' : lineNumber++}</div>
+                            <div class="line-content"></div>
+                        </div>`;
+                        if (part.added || part.removed) {
+                            currentDiffPositions.push(positionIndex);
+                            positionIndex++;
+                        }
+                        return;
+                    }
+
+                    html += `<div class="diff-line ${className}" data-diff-index="${positionIndex}">
+                        <div class="line-number">${part.added || part.removed ? '' : lineNumber++}</div>
+                        <div class="line-content">${escapeHtml(line)}</div>
+                    </div>`;
+
+                    if (part.added || part.removed) {
+                        currentDiffPositions.push(positionIndex);
+                        positionIndex++;
+                    }
+                });
+            });
+
+            resultContent.innerHTML = html;
+            currentDiffIndex = currentDiffPositions.length > 0 ? 0 : -1;
+            scrollToCurrentDiff();
+        }
+
+        function calculateStats(diff) {
+            let insert = 0;
+            let del = 0;
+            let modify = 0;
+
+            diff.forEach(part => {
+                const lineCount = splitLines(part.value).length;
+                if (part.added) insert += lineCount;
+                else if (part.removed) del += lineCount;
+            });
+
+            modify = Math.abs(insert - del);
+            updateStats(insert, del, modify);
+        }
+
+        function updateStats(insert, del, modify) {
+            statInsert.textContent = insert;
+            statDelete.textContent = del;
+            statModify.textContent = modify;
+        }
+
+        // JSON 对比
+        function compareJson(leftText, rightText) {
+            try {
+                const leftObj = JSON.parse(leftText);
+                const rightObj = JSON.parse(rightText);
+                const diff = compareJsonObjects(leftObj, rightObj);
+                renderJsonDiff(diff);
+                calculateJsonStats(diff);
+            } catch (e) {
+                resultContent.innerHTML = `<div style="color: #cf222e; padding: 20px;">
+                    <strong>JSON 解析错误:</strong><br>
+                    ${escapeHtml(e.message)}<br><br>
+                    请检查两侧的 JSON 格式是否正确。
+                </div>`;
+                updateStats(0, 0, 0);
+            }
+        }
+
+        function compareJsonObjects(left, right, path = '') {
+            const diff = [];
+            
+            // 处理键的增删改
+            const allKeys = new Set([...Object.keys(left || {}), ...Object.keys(right || {})]);
+            
+            allKeys.forEach(key => {
+                const newPath = path ? `${path}.${key}` : key;
+                const leftVal = left && left.hasOwnProperty(key) ? left[key] : undefined;
+                const rightVal = right && right.hasOwnProperty(key) ? right[key] : undefined;
+
+                if (leftVal === undefined) {
+                    diff.push({type: 'insert', path: newPath, value: rightVal});
+                } else if (rightVal === undefined) {
+                    diff.push({type: 'delete', path: newPath, value: leftVal});
+                } else if (typeof leftVal !== typeof rightVal) {
+                    diff.push({type: 'modify', path: newPath, left: leftVal, right: rightVal});
+                } else if (typeof leftVal === 'object' && leftVal !== null && rightVal !== null && !Array.isArray(leftVal) && !Array.isArray(rightVal)) {
+                    const nestedDiff = compareJsonObjects(leftVal, rightVal, newPath);
+                    diff.push(...nestedDiff);
+                } else if (JSON.stringify(leftVal) !== JSON.stringify(rightVal)) {
+                    diff.push({type: 'modify', path: newPath, left: leftVal, right: rightVal});
+                }
+            });
+
+            return diff;
+        }
+
+        function renderJsonDiff(diff) {
+            if (diff.length === 0) {
+                resultContent.innerHTML = '<div style="text-align: center; padding: 40px; color: var(--text-secondary);>两个 JSON 对象完全一致，没有差异。</div>';
+                return;
+            }
+
+            let html = '';
+            diff.forEach(item => {
+                let className = '';
+                let label = '';
+                if (item.type === 'insert') {
+                    className = 'json-insert';
+                    label = '[新增]';
+                } else if (item.type === 'delete') {
+                    className = 'json-delete';
+                    label = '[删除]';
+                } else {
+                    className = 'json-modify';
+                    label = '[修改]';
+                }
+
+                html += `<div class="diff-line ${className}">
+                    <div class="line-content"><strong>${label} ${escapeHtml(item.path)}</strong>:<br>`;
+                
+                if (item.type === 'insert') {
+                    html += `&nbsp;&nbsp;值: <code>${escapeHtml(JSON.stringify(item.value, null, 2))}</code>`;
+                } else if (item.type === 'delete') {
+                    html += `&nbsp;&nbsp;值: <code>${escapeHtml(JSON.stringify(item.value, null, 2))}</code>`;
+                } else {
+                    html += `&nbsp;&nbsp;原始: <code>${escapeHtml(JSON.stringify(item.left, null, 2))}</code><br>`;
+                    html += `&nbsp;&nbsp;修改: <code>${escapeHtml(JSON.stringify(item.right, null, 2))}</code>`;
+                }
+
+                html += `</div></div>`;
+            });
+
+            resultContent.innerHTML = html;
+        }
+
+        function calculateJsonStats(diff) {
+            let insert = diff.filter(d => d.type === 'insert').length;
+            let del = diff.filter(d => d.type === 'delete').length;
+            let modify = diff.filter(d => d.type === 'modify').length;
+            updateStats(insert, del, modify);
+            currentDiffPositions = [];
+            diff.forEach((_, i) => currentDiffPositions.push(i));
+            currentDiffIndex = currentDiffPositions.length > 0 ? 0 : -1;
+        }
+
+        // 差异导航
+        prevDiffBtn.addEventListener('click', () => {
+            if (currentDiffPositions.length === 0) {
+                showToast('没有找到差异');
+                return;
+            }
+            if (currentDiffIndex > 0) {
+                currentDiffIndex--;
+                scrollToCurrentDiff();
+            } else {
+                showToast('已经是第一个差异');
+            }
+        });
+
+        nextDiffBtn.addEventListener('click', () => {
+            if (currentDiffPositions.length === 0) {
+                showToast('没有找到差异');
+                return;
+            }
+            if (currentDiffIndex < currentDiffPositions.length - 1) {
+                currentDiffIndex++;
+                scrollToCurrentDiff();
+            } else {
+                showToast('已经是最后一个差异');
+            }
+        });
+
+        function scrollToCurrentDiff() {
+            if (currentDiffIndex < 0 || currentDiffPositions.length === 0) return;
+            const diffElements = resultContent.querySelectorAll('[data-diff-index]');
+            if (diffElements.length === 0) return;
+            
+            const targetIndex = currentDiffPositions[currentDiffIndex];
+            const targetEl = diffElements[targetIndex];
+            if (targetEl) {
+                targetEl.scrollIntoView({behavior: 'smooth', block: 'center'});
+                // 添加临时高亮
+                targetEl.style.outline = '2px solid var(--accent-color)';
+                setTimeout(() => {
+                    targetEl.style.outline = 'none';
+                }, 2000);
+            }
+        }
+
+        // 复制结果
+        copyResultBtn.addEventListener('click', async () => {
+            const text = extractResultText();
+            if (!text) {
+                showToast('没有可复制的结果');
+                return;
+            }
+            try {
+                await navigator.clipboard.writeText(text);
+                showToast('结果已复制到剪贴板');
+            } catch (e) {
+                console.error('Copy failed:', e);
+                showToast('复制失败，请手动复制');
+            }
+        });
+
+        // 导出报告
+        exportBtn.addEventListener('click', () => {
+            const text = extractResultText();
+            if (!text) {
+                showToast('没有可导出的结果');
+                return;
+            }
+            const blob = new Blob([text], {type: 'text/plain'});
+            const url = URL.createObjectURL(blob);
+            const a = document.createElement('a');
+            const timestamp = new Date().toISOString().slice(0, 19).replace(/[:T]/g, '-');
+            a.download = `diff-report-${timestamp}.txt`;
+            a.href = url;
+            a.click();
+            URL.revokeObjectURL(url);
+            showToast('报告已导出');
+        });
+
+        function extractResultText() {
+            // 提取纯文本结果
+            const lines = [];
+            const diffElements = resultContent.querySelectorAll('.diff-line');
+            if (diffElements.length === 0) {
+                const text = resultContent.textContent;
+                return text && text.trim() ? text : '';
+            }
+            diffElements.forEach(el => {
+                const content = el.querySelector('.line-content');
+                if (content) lines.push(content.textContent);
+            });
+            return lines.join('\n');
+        }
+
+        function escapeHtml(text) {
+            const map = {
+                '&': '&amp;',
+                '<': '&lt;',
+                '>': '&gt;',
+                '"': '&quot;',
+                "'": '&#039;'
+            };
+            return text.replace(/[&<>"]/g, m => map[m]);
+        }
+
+        // 初始化
+        initTheme();
+        updateUIVisibility();
+    </script>
+</body>
+</html>
