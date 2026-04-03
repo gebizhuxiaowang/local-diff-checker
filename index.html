@@ -1483,7 +1483,7 @@
         }
 
         // 渲染单行（拆分对齐视图）
-        function renderAligned(content, className, lineNumber, diffIndex, wordWrap, canCopy) {
+        function renderAlignedLine(content, className, lineNumber, diffIndex, wordWrap, canCopy) {
             const wrapAttr = `data-wrap="${wordWrap}"`;
             const diffAttr = diffIndex >= 0 ? `data-diff-index="${diffIndex}"` : '';
             const copyBtn = canCopy ? `<button class="copy-btn btn-sm" data-line-content="${escapeHtml(content).replace(/"/g, '&quot;')}">复制</button>` : '';
